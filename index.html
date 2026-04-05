@@ -18,7 +18,8 @@
   .live-dot{width:8px;height:8px;background:#34d399;border-radius:50%;animation:pulse 2s infinite}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
   .container{max-width:1200px;margin:0 auto;padding:24px}
-  .alert-bar{padding:12px 20px;border-radius:10px;margin-bottom:20px;font-size:14px;display:flex;align-items:center;gap:10px;display:none}
+  .alert-bar{padding:12px 20px;border-radius:10px;margin-bottom:20px;font-size:14px;display:flex;align-items:center;gap:10px}
+  .alert-bar{display:none}
   .alert-good{background:#064e3b;border:1px solid #065f46;color:#34d399}
   .alert-warn{background:#451a03;border:1px solid #78350f;color:#fbbf24}
   .alert-danger{background:#450a0a;border:1px solid #7f1d1d;color:#f87171}
@@ -40,7 +41,7 @@
   .bottom-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   .panel{background:#1e293b;border:1px solid #334155;border-radius:16px;padding:20px}
   .panel-header{font-size:14px;font-weight:600;color:#f1f5f9;margin-bottom:16px;display:flex;align-items:center;gap:8px}
-  .device-row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid #1e293b}
+  .device-row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid #0f172a}
   .device-row:last-child{border-bottom:none}
   .device-info{display:flex;align-items:center;gap:12px}
   .device-icon{width:36px;height:36px;background:#0f172a;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px}
@@ -83,7 +84,6 @@
   <div class="live-badge">
     <div class="live-dot"></div>
     <span id="liveText">Connecting...</span>
-    <button onclick="testFirebase()" style="margin-left:10px;padding:4px 8px;background:#334155;border:none;border-radius:4px;color:#94a3b8;cursor:pointer">Test</button>
   </div>
 </div>
 
@@ -184,16 +184,26 @@
           <span class="tog-slider"></span>
         </label>
       </div>
+
+      <div class="device-row">
+        <div class="device-info">
+          <div class="device-icon">🌀</div>
+          <div>
+            <div class="device-name">Fan 4</div>
+            <div class="device-state state-off" id="fan4-state">OFF</div>
+          </div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="tog-fan4" onchange="control('fan4',this.checked)">
+          <span class="tog-slider"></span>
+        </label>
+      </div>
+
     </div>
 
     <div class="panel">
       <div class="panel-header">📋 Activity Log</div>
       <div class="log-area" id="logArea"></div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-header">🔍 Firebase Data (Debug)</div>
-      <div class="log-area" id="debugArea"></div>
     </div>
   </div>
 
@@ -231,117 +241,130 @@ function addLog(msg, color) {
   ).join('');
 }
 
-firebase.database().ref('.info/connected').on('value', snap => {
-  if(snap.val() === true) {
-    document.getElementById('liveText').textContent = 'Connected';
-    addLog('Connected to Firebase','#34d399');
-  } else {
-    document.getElementById('liveText').textContent = 'Offline';
-    addLog('Connection lost','#f87171');
+// =============================================
+// READ ALL FIREBASE DATA FROM ROOT
+// This fixes the "--" problem completely!
+// =============================================
+db.ref('/').on('value', snap => {
+  const d = snap.val();
+  if(!d) {
+    addLog('No data from Firebase yet...','#94a3b8');
+    return;
   }
-});
 
-function updateSensorUI(data) {
-  if(!data) return;
-  
+  // Show connected
   document.getElementById('liveText').textContent = 'Live';
   document.getElementById('alertBar').style.display = 'flex';
+  addLog('Connected to Firebase','#34d399');
 
-  const temp = data.Temperature !== undefined && data.Temperature !== null ? parseFloat(data.Temperature).toFixed(1) : '--';
-  const hum  = data.Humidity !== undefined && data.Humidity !== null ? parseFloat(data.Humidity).toFixed(1) : '--';
-  const air  = data.Aqi !== undefined && data.Aqi !== null ? data.Aqi : '--';
+  // Get sensor values — works with both structures
+  let temp, hum, air, buz;
 
-  document.getElementById('tempVal').textContent = temp;
-  document.getElementById('humVal').textContent  = hum;
-  document.getElementById('airVal').textContent  = air;
+  // Try /sensors/temperature first
+  if(d.sensors) {
+    temp = d.sensors.temperature;
+    hum  = d.sensors.humidity;
+    air  = d.sensors.airquality;
+    buz  = d.sensors.buzzer;
+  }
 
-  const tNum = parseFloat(temp);
+  // Fallback — try root level Temperature/Humidity/Aqi
+  if(!temp && d.Temperature) temp = d.Temperature;
+  if(!hum  && d.Humidity)    hum  = d.Humidity;
+  if(!air  && d.Aqi)         air  = d.Aqi;
+
+  // Format values
+  const tempStr = temp ? parseFloat(temp).toFixed(1) : '--';
+  const humStr  = hum  ? parseFloat(hum).toFixed(1)  : '--';
+  const airNum  = air  ? parseInt(air)                : 0;
+  const airStr  = air  ? String(parseInt(air))        : '--';
+
+  // Update sensor cards
+  document.getElementById('tempVal').textContent = tempStr;
+  document.getElementById('humVal').textContent  = humStr;
+  document.getElementById('airVal').textContent  = airStr;
+
+  // Temperature status
+  const tNum = parseFloat(tempStr);
   const tEl  = document.getElementById('tempStatus');
-  if(!isNaN(tNum)) {
-    if(tNum > 35){tEl.textContent='Very Hot';tEl.className='scard-status status-bad';}
-    else if(tNum > 30){tEl.textContent='Hot';tEl.className='scard-status status-warn';}
-    else{tEl.textContent='Normal';tEl.className='scard-status status-good';}
+  if(tNum > 38){
+    tEl.textContent='Critical!';
+    tEl.className='scard-status status-bad';
+  } else if(tNum > 33){
+    tEl.textContent='Very Hot';
+    tEl.className='scard-status status-bad';
+  } else if(tNum > 28){
+    tEl.textContent='Hot';
+    tEl.className='scard-status status-warn';
+  } else {
+    tEl.textContent='Normal';
+    tEl.className='scard-status status-good';
   }
 
+  // Air quality and buzzer status
   const aEl = document.getElementById('airStatus');
-  const aNum = parseInt(air);
-  if(!isNaN(aNum)) {
-    if(aNum > 400){
-      aEl.textContent='Poor — Alert!';aEl.className='scard-status status-bad';
-      document.getElementById('alertBar').className='alert-bar alert-danger';
-      document.getElementById('alertIcon').textContent='🚨';
-      document.getElementById('alertMsg').textContent='Poor air quality! Buzzer is active. Open windows immediately!';
-      document.getElementById('buzzerVal').textContent='ALERT!';
-      document.getElementById('buzzerStatus').textContent='Active';
-      document.getElementById('buzzerStatus').className='scard-status status-bad';
-      addLog('ALERT: Poor air quality detected!','#f87171');
-    } else if(aNum > 300){
-      aEl.textContent='Moderate';aEl.className='scard-status status-warn';
-      document.getElementById('alertBar').className='alert-bar alert-warn';
-      document.getElementById('alertIcon').textContent='⚠️';
-      document.getElementById('alertMsg').textContent='Air quality is moderate. Monitor closely.';
-    } else {
-      aEl.textContent='Good';aEl.className='scard-status status-good';
-      document.getElementById('alertBar').className='alert-bar alert-good';
-      document.getElementById('alertIcon').textContent='✅';
-      document.getElementById('alertMsg').textContent='All systems normal. Classroom environment is healthy.';
-      document.getElementById('buzzerVal').textContent='Normal';
-      document.getElementById('buzzerStatus').textContent='Safe';
-      document.getElementById('buzzerStatus').className='scard-status status-good';
-    }
+  if(airNum > 400){
+    aEl.textContent='Poor — Alert!';
+    aEl.className='scard-status status-bad';
+    document.getElementById('alertBar').className='alert-bar alert-danger';
+    document.getElementById('alertBar').style.display='flex';
+    document.getElementById('alertIcon').textContent='🚨';
+    document.getElementById('alertMsg').textContent='Poor air quality! Buzzer is active. Open windows immediately!';
+    document.getElementById('buzzerVal').textContent='ALERT!';
+    document.getElementById('buzzerSub').textContent='Air quality critical!';
+    document.getElementById('buzzerStatus').textContent='Active';
+    document.getElementById('buzzerStatus').className='scard-status status-bad';
+    addLog('🚨 ALERT: Poor air quality! AQI = '+airStr,'#f87171');
+  } else if(airNum > 300){
+    aEl.textContent='Moderate';
+    aEl.className='scard-status status-warn';
+    document.getElementById('alertBar').className='alert-bar alert-warn';
+    document.getElementById('alertBar').style.display='flex';
+    document.getElementById('alertIcon').textContent='⚠️';
+    document.getElementById('alertMsg').textContent='Air quality is moderate. Monitor closely.';
+    document.getElementById('buzzerVal').textContent='Warning';
+    document.getElementById('buzzerSub').textContent='Monitor air quality';
+    document.getElementById('buzzerStatus').textContent='Watching';
+    document.getElementById('buzzerStatus').className='scard-status status-warn';
+  } else if(airNum > 0){
+    aEl.textContent='Good';
+    aEl.className='scard-status status-good';
+    document.getElementById('alertBar').className='alert-bar alert-good';
+    document.getElementById('alertBar').style.display='flex';
+    document.getElementById('alertIcon').textContent='✅';
+    document.getElementById('alertMsg').textContent='All systems normal. Classroom environment is healthy.';
+    document.getElementById('buzzerVal').textContent='Normal';
+    document.getElementById('buzzerSub').textContent='No active alert';
+    document.getElementById('buzzerStatus').textContent='Safe';
+    document.getElementById('buzzerStatus').className='scard-status status-good';
   }
-  
-  addLog(`Temp: ${temp}°C, Hum: ${hum}%, Air: ${air}`,'#06b6d4');
-}
 
-function showRawData(data) {
-  document.getElementById('debugArea').innerHTML = 
-    `<div class="log-entry" style="color:#94a3b8;font-size:11px">${JSON.stringify(data, null, 2)}</div>`;
-}
+  // Log sensor reading
+  addLog('Temp: '+tempStr+'°C | Hum: '+humStr+'% | AQI: '+airStr,'#64748b');
 
-db.ref().on('value', snap => {
-  const data = snap.val();
-  console.log('Firebase data:', data);
-  showRawData(data);
-  if (data) {
-    updateSensorUI(data);
-    if (data.controls) {
-      ['light','fan1','fan2','fan3'].forEach(dev => {
-        const state = data.controls[dev] === true;
-        const tog = document.getElementById('tog-'+dev);
-        const stateEl = document.getElementById(dev+'-state');
-        if(tog) tog.checked = state;
-        if(stateEl){
-          stateEl.textContent = state ? 'ON' : 'OFF';
-          stateEl.className = state ? 'device-state state-on' : 'device-state state-off';
-        }
-      });
+  // Update device controls
+  const controls = d.controls || {};
+  ['light','fan1','fan2','fan3','fan4'].forEach(dev => {
+    const state = controls[dev] || false;
+    const tog = document.getElementById('tog-'+dev);
+    const stateEl = document.getElementById(dev+'-state');
+    if(tog) tog.checked = state;
+    if(stateEl){
+      stateEl.textContent = state ? 'ON' : 'OFF';
+      stateEl.className = state ? 'device-state state-on' : 'device-state state-off';
     }
-  }
-}, err => {
-  console.error('Firebase error:', err);
+  });
 });
 
+// Send ON/OFF command to Firebase
 function control(device, state) {
-  db.ref('/controls/'+device).set(state).then(() => {
-    addLog((device.charAt(0).toUpperCase()+device.slice(1))+' turned '+(state?'ON':'OFF'), state?'#34d399':'#f87171');
-  }).catch(err => {
-    addLog('Failed to control '+device+': '+err.message,'#f87171');
-  });
+  db.ref('/controls/'+device).set(state);
+  const name = device.charAt(0).toUpperCase()+device.slice(1);
+  addLog(name+' turned '+(state?'ON':'OFF'), state?'#34d399':'#f87171');
 }
 
 addLog('Dashboard loaded successfully','#34d399');
 addLog('Waiting for ESP32 sensor data...','#94a3b8');
-
-function testFirebase() {
-  addLog('Testing Firebase connection...','#94a3b8');
-  db.ref().once('value').then(snap => {
-    addLog('Firebase OK! Data: ' + JSON.stringify(snap.val()), '#34d399');
-    showRawData(snap.val());
-  }).catch(err => {
-    addLog('Firebase Error: ' + err.message,'#f87171');
-  });
-}
 </script>
 </body>
 </html>
