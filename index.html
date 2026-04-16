@@ -258,18 +258,14 @@ db.ref('/').on('value', snap => {
   addLog('Connected to Firebase','#34d399');
 
   // Get sensor values — works with both structures
-  let temp, hum, air, buz;
+  // ✅ Correct path from Firebase
+let temp = d.controls?.temperature;
+let hum  = d.controls?.humidity;
+let air  = d.controls?.airQuality;
 
-  // Try /sensors/temperature first
-  if(d.sensors) {
-    temp = d.sensors.temperature;
-    hum  = d.sensors.humidity;
-    air  = d.sensors.airquality;
-    buz  = d.sensors.buzzer;
-  }
 
   // Fallback — try root level Temperature/Humidity/Aqi
-  if(!temp && d.Temperature) temp = d.Temperature;
+  
   if(!hum  && d.Humidity)    hum  = d.Humidity;
   if(!air  && d.Aqi)         air  = d.Aqi;
 
